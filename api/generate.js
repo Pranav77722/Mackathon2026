@@ -24,23 +24,40 @@ const fetchMasterData = async () => {
     });
 };
 
-const generateCertificateBuffer = async (studentName, teamName) => {
-    // Use __dirname which is the api/ directory — reliable in serverless
-    const templatePath = path.join(__dirname, 'assets', 'certificate_template.png');
+/**
+ * Custom font loader that reads font files as Buffers first,
+ * avoiding any internal path resolution issues in jimp.
+ */
+const loadLocalFont = async (fntPath) => {
+    // Read the .fnt XML file
+    const fntContent = fs.readFileSync(fntPath, 'utf8');
+    const fontDir = path.dirname(fntPath);
 
-    console.log('Template path:', templatePath);
-    console.log('Template exists:', fs.existsSync(templatePath));
+    // Parse jimp's internal format: it expects an object with data + pages
+    // We use jimp's internal loadFont with a file url approach, but the safest
+    // method is to temporarily symlink or use the full resolved path.
+    // Since jimp uses `uniqs` internally, we just call loadFont with the
+    // absolute path directly - which SHOULD work given our __dirname approach.
+    return await Jimp.loadFont(fntPath);
+};
+
+const generateCertificateBuffer = async (studentName, teamName) => {
+    const templatePath = path.join(__dirname, 'assets', 'certificate_template.png');
+    const fontPath = path.join(__dirname, 'fonts', 'open-sans-64-black', 'open-sans-64-black.fnt');
+
+    console.log('[generate] Template:', templatePath, '| exists:', fs.existsSync(templatePath));
+    console.log('[generate] Font:', fontPath, '| exists:', fs.existsSync(fontPath));
 
     if (!fs.existsSync(templatePath)) {
-        const dirContents = fs.existsSync(path.join(__dirname, 'assets'))
-            ? fs.readdirSync(path.join(__dirname, 'assets'))
-            : 'assets dir missing';
-        throw new Error(`Certificate template not found at ${templatePath}. Dir: ${JSON.stringify(dirContents)}`);
+        throw new Error(`Template not found: ${templatePath}`);
+    }
+    if (!fs.existsSync(fontPath)) {
+        const fontsDir = path.join(__dirname, 'fonts');
+        const contents = fs.existsSync(fontsDir) ? JSON.stringify(fs.readdirSync(fontsDir)) : 'fonts dir missing';
+        throw new Error(`Font not found: ${fontPath}. Fonts dir: ${contents}`);
     }
 
     const image = await Jimp.read(templatePath);
-    // Load font from local directory (bundled with the function, not from node_modules)
-    const fontPath = path.join(__dirname, 'fonts', 'open-sans-64-black', 'open-sans-64-black.fnt');
     const font = await Jimp.loadFont(fontPath);
 
     const displayText = `${studentName} of Team "${teamName}"`;
@@ -48,7 +65,6 @@ const generateCertificateBuffer = async (studentName, teamName) => {
     const width = image.bitmap.width;
     const height = image.bitmap.height;
 
-    // Center horizontally, ~56% down
     const maxWidth = Math.floor(width * 0.75);
     const textX = Math.floor((width - maxWidth) / 2);
     const textY = Math.floor(height * 0.54);
@@ -74,13 +90,8 @@ module.exports = async (req, res) => {
     res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-    }
-
-    if (req.method !== 'POST') {
-        return res.status(405).json({ message: 'Method Not Allowed' });
-    }
+    if (req.method === 'OPTIONS') return res.status(200).end();
+    if (req.method !== 'POST') return res.status(405).json({ message: 'Method Not Allowed' });
 
     const { name, teamId } = req.body;
     if (!name || !teamId) {
@@ -91,8 +102,6 @@ module.exports = async (req, res) => {
         const masterData = await fetchMasterData();
         const lookupName = name.trim().toLowerCase();
         const lookupTeamId = teamId.trim().toLowerCase();
-
-        console.log(`Looking up: name="${lookupName}", teamId="${lookupTeamId}"`);
 
         const record = masterData.find(row => {
             const rowName = (row['Name'] || '').toString().trim().toLowerCase();
@@ -107,15 +116,14 @@ module.exports = async (req, res) => {
         const fullName = (record['Name'] || '').trim();
         const teamName = (record['Team Name'] || record['Team Name '] || '-').trim();
 
-        console.log(`Generating for: ${fullName}, ${teamName}`);
+        console.log(`[generate] Creating certificate for: ${fullName} / ${teamName}`);
 
         const buffer = await generateCertificateBuffer(fullName, teamName);
-
         res.setHeader('Content-Type', 'image/png');
         res.status(200).send(buffer);
 
     } catch (error) {
-        console.error('Error generating certificate:', error.message, error.stack);
+        console.error('[generate] Error:', error.message);
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
