@@ -25,28 +25,31 @@ const fetchMasterData = async () => {
 };
 
 const generateCertificateBuffer = async (studentName, teamName) => {
-    const templatePath = path.join(process.cwd(), 'api/assets/certificate_template.png');
-    
+    // Use __dirname which is the api/ directory — reliable in serverless
+    const templatePath = path.join(__dirname, 'assets', 'certificate_template.png');
+
+    console.log('Template path:', templatePath);
+    console.log('Template exists:', fs.existsSync(templatePath));
+
     if (!fs.existsSync(templatePath)) {
-        throw new Error('Certificate template not found');
+        const dirContents = fs.existsSync(path.join(__dirname, 'assets'))
+            ? fs.readdirSync(path.join(__dirname, 'assets'))
+            : 'assets dir missing';
+        throw new Error(`Certificate template not found at ${templatePath}. Dir: ${JSON.stringify(dirContents)}`);
     }
 
     const image = await Jimp.read(templatePath);
-    
-    // Load a font - Jimp.FONT_SANS_64_BLACK is a good standard size
-    // We try to load 64, then fall back to 32 if name is long (though we can scale the text box)
     const font = await Jimp.loadFont(Jimp.FONT_SANS_64_BLACK);
 
     const displayText = `${studentName} of Team "${teamName}"`;
-    
-    // Dimensions
+
     const width = image.bitmap.width;
     const height = image.bitmap.height;
-    
-    // Positioning: Center horizontally, ~56% down Vertically
-    const textY = height * 0.54; // Adjusted slightly for Jimp alignment
-    const maxWidth = width * 0.8;
-    const textX = (width - maxWidth) / 2;
+
+    // Center horizontally, ~56% down
+    const maxWidth = Math.floor(width * 0.75);
+    const textX = Math.floor((width - maxWidth) / 2);
+    const textY = Math.floor(height * 0.54);
 
     image.print(
         font,
@@ -58,14 +61,13 @@ const generateCertificateBuffer = async (studentName, teamName) => {
             alignmentY: Jimp.VERTICAL_ALIGN_MIDDLE
         },
         maxWidth,
-        height * 0.1 // Max height for the text line
+        Math.floor(height * 0.1)
     );
 
     return await image.getBufferAsync(Jimp.MIME_PNG);
 };
 
 module.exports = async (req, res) => {
-    // Add CORS headers manually for Vercel
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -87,7 +89,9 @@ module.exports = async (req, res) => {
         const masterData = await fetchMasterData();
         const lookupName = name.trim().toLowerCase();
         const lookupTeamId = teamId.trim().toLowerCase();
-        
+
+        console.log(`Looking up: name="${lookupName}", teamId="${lookupTeamId}"`);
+
         const record = masterData.find(row => {
             const rowName = (row['Name'] || '').toString().trim().toLowerCase();
             const rowTeamId = (row['Team ID'] || '').toString().trim().toLowerCase();
@@ -101,13 +105,15 @@ module.exports = async (req, res) => {
         const fullName = (record['Name'] || '').trim();
         const teamName = (record['Team Name'] || record['Team Name '] || '-').trim();
 
+        console.log(`Generating for: ${fullName}, ${teamName}`);
+
         const buffer = await generateCertificateBuffer(fullName, teamName);
 
         res.setHeader('Content-Type', 'image/png');
         res.status(200).send(buffer);
 
     } catch (error) {
-        console.error('Error generating certificate:', error);
+        console.error('Error generating certificate:', error.message, error.stack);
         res.status(500).json({ message: 'Internal server error', error: error.message });
     }
 };
