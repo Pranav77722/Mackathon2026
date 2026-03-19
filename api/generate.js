@@ -1,4 +1,4 @@
-const { registerFont, createCanvas, loadImage } = require('canvas');
+const Jimp = require('jimp');
 const path = require('path');
 const fs = require('fs');
 const csv = require('csv-parser');
@@ -31,36 +31,41 @@ const generateCertificateBuffer = async (studentName, teamName) => {
         throw new Error('Certificate template not found');
     }
 
-    const image = await loadImage(templatePath);
-    const canvas = createCanvas(image.width, image.height);
-    const ctx = canvas.getContext('2d');
-
-    ctx.drawImage(image, 0, 0, image.width, image.height);
+    const image = await Jimp.read(templatePath);
+    
+    // Load a font - Jimp.FONT_SANS_64_BLACK is a good standard size
+    // We try to load 64, then fall back to 32 if name is long (though we can scale the text box)
+    const font = await Jimp.loadFont(Jimp.FONT_SANS_64_BLACK);
 
     const displayText = `${studentName} of Team "${teamName}"`;
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#1a1a6e';
-
-    let fontSize = 46;
-    const maxTextWidth = image.width * 0.65;
-    ctx.font = `bold ${fontSize}px serif`; // Stick to serif for simplicity on Vercel
     
-    let textWidth = ctx.measureText(displayText).width;
-    while (textWidth > maxTextWidth && fontSize > 18) {
-        fontSize -= 2;
-        ctx.font = `bold ${fontSize}px serif`;
-        textWidth = ctx.measureText(displayText).width;
-    }
+    // Dimensions
+    const width = image.bitmap.width;
+    const height = image.bitmap.height;
+    
+    // Positioning: Center horizontally, ~56% down Vertically
+    const textY = height * 0.54; // Adjusted slightly for Jimp alignment
+    const maxWidth = width * 0.8;
+    const textX = (width - maxWidth) / 2;
 
-    const textX = image.width / 2;
-    const textY = image.height * 0.56;
-    ctx.fillText(displayText, textX, textY);
+    image.print(
+        font,
+        textX,
+        textY,
+        {
+            text: displayText,
+            alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
+            alignmentY: Jimp.VERTICAL_ALIGN_MIDDLE
+        },
+        maxWidth,
+        height * 0.1 // Max height for the text line
+    );
 
-    return canvas.toBuffer('image/png');
+    return await image.getBufferAsync(Jimp.MIME_PNG);
 };
 
 module.exports = async (req, res) => {
+    // Add CORS headers manually for Vercel
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -98,7 +103,6 @@ module.exports = async (req, res) => {
 
         const buffer = await generateCertificateBuffer(fullName, teamName);
 
-        // Return image directly as binary
         res.setHeader('Content-Type', 'image/png');
         res.status(200).send(buffer);
 
