@@ -10,11 +10,11 @@ const CertificateList = ({ files }) => {
                 {files.map((file, idx) => (
                     <div key={idx} className="cert-preview-card">
                         <img
-                            src={`http://localhost:5000${file}`}
+                            src={file}
                             alt="Certificate Preview"
                             className="cert-preview-img"
                             loading="lazy"
-                            onClick={() => window.open(`http://localhost:5000${file}`, '_blank')}
+                            onClick={() => window.open(file, '_blank')}
                             title="Click to open in new tab"
                         />
                         <div className="cert-actions">
@@ -22,7 +22,7 @@ const CertificateList = ({ files }) => {
                                 {file.split('/').pop()}
                             </span>
                             <a
-                                href={`http://localhost:5000${file}`}
+                                href={file}
                                 download
                                 className="cert-download"
                                 target="_blank"
