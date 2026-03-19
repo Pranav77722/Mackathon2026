@@ -39,7 +39,9 @@ const generateCertificateBuffer = async (studentName, teamName) => {
     }
 
     const image = await Jimp.read(templatePath);
-    const font = await Jimp.loadFont(Jimp.FONT_SANS_64_BLACK);
+    // Load font from local directory (bundled with the function, not from node_modules)
+    const fontPath = path.join(__dirname, 'fonts', 'open-sans-64-black', 'open-sans-64-black.fnt');
+    const font = await Jimp.loadFont(fontPath);
 
     const displayText = `${studentName} of Team "${teamName}"`;
 
