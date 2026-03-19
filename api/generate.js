@@ -6,6 +6,17 @@ const { Readable } = require('stream');
 
 const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSOApy4W5XFLgUMtce2fP1OVv6UZx80HblSgXQjG3XGv8zLHR85_lveiDjrWGK34bSb1p-vIOroijFe/pub?output=csv';
 
+// Load and cache the font as base64 once at startup
+let fontBase64 = null;
+const getFontBase64 = () => {
+    if (!fontBase64) {
+        const fontPath = path.join(__dirname, 'fonts', 'Roboto-Bold.ttf');
+        const fontBuffer = fs.readFileSync(fontPath);
+        fontBase64 = fontBuffer.toString('base64');
+    }
+    return fontBase64;
+};
+
 const fetchMasterData = async () => {
     const response = await fetch(GOOGLE_SHEET_CSV_URL);
     if (!response.ok) throw new Error(`Failed to fetch Google Sheet: ${response.statusText}`);
@@ -21,9 +32,6 @@ const fetchMasterData = async () => {
     });
 };
 
-/**
- * Escape special XML characters to prevent SVG injection issues.
- */
 const xmlEscape = (str) =>
     str.replace(/&/g, '&amp;')
        .replace(/</g, '&lt;')
@@ -32,12 +40,11 @@ const xmlEscape = (str) =>
        .replace(/'/g, '&apos;');
 
 /**
- * Calculate font size dynamically, scaling down if the text is too long.
+ * Rough text width estimator: ~0.6 × fontSize per character for Roboto Bold
  */
 const calcFontSize = (text, maxPx, startSize = 58) => {
-    // Approximate: average char width ~ 0.55 * fontSize for serif bold
     let size = startSize;
-    while (size > 24 && text.length * size * 0.58 > maxPx) {
+    while (size > 22 && text.length * size * 0.60 > maxPx) {
         size -= 2;
     }
     return size;
@@ -45,49 +52,48 @@ const calcFontSize = (text, maxPx, startSize = 58) => {
 
 const generateCertificateBuffer = async (studentName, teamName) => {
     const templatePath = path.join(__dirname, 'assets', 'certificate_template.png');
+    if (!fs.existsSync(templatePath)) throw new Error(`Template not found: ${templatePath}`);
 
-    if (!fs.existsSync(templatePath)) {
-        throw new Error(`Template not found: ${templatePath}`);
-    }
-
-    // Get template dimensions
     const meta = await sharp(templatePath).metadata();
     const { width, height } = meta;
 
     const displayText = xmlEscape(`${studentName} of Team "${teamName}"`);
-
-    // The blank area on the certificate is roughly between 48% and 60% of height
-    // Center text at ~53% down
-    const textY = Math.floor(height * 0.535);
     const maxTextWidth = Math.floor(width * 0.65);
     const fontSize = calcFontSize(displayText, maxTextWidth);
 
-    // Build SVG overlay (same size as certificate, transparent background)
-    const svgOverlay = `
-<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+    // Embed Roboto Bold font as base64 so librsvg doesn't need system fonts
+    const robotoBase64 = getFontBase64();
+
+    // Y position: center of the blank space on the certificate (~53% down)
+    const textY = Math.floor(height * 0.535);
+
+    const svgOverlay = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+  <defs>
+    <style>
+      @font-face {
+        font-family: 'RobotoBold';
+        font-weight: bold;
+        src: url('data:font/truetype;base64,${robotoBase64}') format('truetype');
+      }
+    </style>
+  </defs>
   <text
     x="${Math.floor(width / 2)}"
     y="${textY}"
     text-anchor="middle"
     dominant-baseline="middle"
-    font-family="Georgia, 'Times New Roman', serif"
-    font-size="${fontSize}"
+    font-family="RobotoBold"
     font-weight="bold"
+    font-size="${fontSize}"
     fill="#1a1a6e"
-    letter-spacing="1"
+    letter-spacing="0.5"
   >${displayText}</text>
 </svg>`;
 
-    const buffer = await sharp(templatePath)
-        .composite([{
-            input: Buffer.from(svgOverlay),
-            top: 0,
-            left: 0
-        }])
+    return await sharp(templatePath)
+        .composite([{ input: Buffer.from(svgOverlay), top: 0, left: 0 }])
         .png()
         .toBuffer();
-
-    return buffer;
 };
 
 module.exports = async (req, res) => {
@@ -120,8 +126,6 @@ module.exports = async (req, res) => {
 
         const fullName = (record['Name'] || '').trim();
         const teamName = (record['Team Name'] || record['Team Name '] || '-').trim();
-
-        console.log(`[generate] Creating for: ${fullName} / ${teamName}`);
 
         const buffer = await generateCertificateBuffer(fullName, teamName);
         res.setHeader('Content-Type', 'image/png');
