@@ -86,11 +86,11 @@ module.exports = async (req, res) => {
     try {
         const masterData = await fetchMasterData();
         const lookupName = name.trim().toLowerCase();
-        const lookupTeamId = teamId.trim().toLowerCase();
+        const lookupTeamId = teamId.trim().toUpperCase();
 
         const record = masterData.find(row => {
             const rowName = (row['Name'] || '').toString().trim().toLowerCase();
-            const rowTeamId = (row['Team ID'] || '').toString().trim().toLowerCase();
+            const rowTeamId = (row['Team ID'] || '').toString().trim().toUpperCase();
             return rowName === lookupName && rowTeamId === lookupTeamId;
         });
 

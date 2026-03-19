@@ -38,10 +38,10 @@ module.exports = async (req, res) => {
 
     try {
         const masterData = await fetchMasterData();
-        const lookupId = teamId.trim().toLowerCase();
+        const lookupId = teamId.trim().toUpperCase();
 
         const record = masterData.find(row =>
-            (row['Team ID'] || '').toString().trim().toLowerCase() === lookupId
+            (row['Team ID'] || '').toString().trim().toUpperCase() === lookupId
         );
 
         if (!record) {
