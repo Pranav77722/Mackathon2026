@@ -1,4 +1,4 @@
-const sharp = require('sharp');
+const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const path = require('path');
 const fs = require('fs');
 const csv = require('csv-parser');
@@ -6,16 +6,14 @@ const { Readable } = require('stream');
 
 const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSOApy4W5XFLgUMtce2fP1OVv6UZx80HblSgXQjG3XGv8zLHR85_lveiDjrWGK34bSb1p-vIOroijFe/pub?output=csv';
 
-// Load and cache the font as base64 once at startup
-let fontBase64 = null;
-const getFontBase64 = () => {
-    if (!fontBase64) {
-        const fontPath = path.join(__dirname, 'fonts', 'Roboto-Bold.ttf');
-        const fontBuffer = fs.readFileSync(fontPath);
-        fontBase64 = fontBuffer.toString('base64');
-    }
-    return fontBase64;
-};
+// Register custom font at startup
+const fontPath = path.join(__dirname, 'fonts', 'Roboto-Bold.ttf');
+if (fs.existsSync(fontPath)) {
+    GlobalFonts.registerFromPath(fontPath, 'RobotoBold');
+    console.log('[generate] Font registered: RobotoBold');
+} else {
+    console.error('[generate] Font file missing:', fontPath);
+}
 
 const fetchMasterData = async () => {
     const response = await fetch(GOOGLE_SHEET_CSV_URL);
@@ -32,68 +30,44 @@ const fetchMasterData = async () => {
     });
 };
 
-const xmlEscape = (str) =>
-    str.replace(/&/g, '&amp;')
-       .replace(/</g, '&lt;')
-       .replace(/>/g, '&gt;')
-       .replace(/"/g, '&quot;')
-       .replace(/'/g, '&apos;');
-
-/**
- * Rough text width estimator: ~0.6 × fontSize per character for Roboto Bold
- */
-const calcFontSize = (text, maxPx, startSize = 58) => {
-    let size = startSize;
-    while (size > 22 && text.length * size * 0.60 > maxPx) {
-        size -= 2;
-    }
-    return size;
-};
-
 const generateCertificateBuffer = async (studentName, teamName) => {
     const templatePath = path.join(__dirname, 'assets', 'certificate_template.png');
-    if (!fs.existsSync(templatePath)) throw new Error(`Template not found: ${templatePath}`);
+    if (!fs.existsSync(templatePath)) throw new Error('Certificate template not found');
 
-    const meta = await sharp(templatePath).metadata();
-    const { width, height } = meta;
+    const image = await loadImage(templatePath);
+    const canvas = createCanvas(image.width, image.height);
+    const ctx = canvas.getContext('2d');
 
-    const displayText = xmlEscape(`${studentName} of Team "${teamName}"`);
-    const maxTextWidth = Math.floor(width * 0.65);
-    const fontSize = calcFontSize(displayText, maxTextWidth);
+    // Draw template
+    ctx.drawImage(image, 0, 0, image.width, image.height);
 
-    // Embed Roboto Bold font as base64 so librsvg doesn't need system fonts
-    const robotoBase64 = getFontBase64();
+    // Build text
+    const displayText = `${studentName} of Team "${teamName}"`;
 
-    // Y position: center of the blank space on the certificate (~53% down)
-    const textY = Math.floor(height * 0.535);
+    // Configure text
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#1a1a6e'; // Dark blue matching certificate theme
 
-    const svgOverlay = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-  <defs>
-    <style>
-      @font-face {
-        font-family: 'RobotoBold';
-        font-weight: bold;
-        src: url('data:font/truetype;base64,${robotoBase64}') format('truetype');
-      }
-    </style>
-  </defs>
-  <text
-    x="${Math.floor(width / 2)}"
-    y="${textY}"
-    text-anchor="middle"
-    dominant-baseline="middle"
-    font-family="RobotoBold"
-    font-weight="bold"
-    font-size="${fontSize}"
-    fill="#1a1a6e"
-    letter-spacing="0.5"
-  >${displayText}</text>
-</svg>`;
+    // Start at 46px bold, auto-shrink if too wide
+    let fontSize = 46;
+    const maxTextWidth = image.width * 0.65;
+    ctx.font = `bold ${fontSize}px RobotoBold`;
+    let textWidth = ctx.measureText(displayText).width;
 
-    return await sharp(templatePath)
-        .composite([{ input: Buffer.from(svgOverlay), top: 0, left: 0 }])
-        .png()
-        .toBuffer();
+    while (textWidth > maxTextWidth && fontSize > 20) {
+        fontSize -= 2;
+        ctx.font = `bold ${fontSize}px RobotoBold`;
+        textWidth = ctx.measureText(displayText).width;
+    }
+
+    // Position: centered horizontally, in the blank area (~53.5% down)
+    const textX = image.width / 2;
+    const textY = image.height * 0.535;
+
+    ctx.fillText(displayText, textX, textY);
+
+    return canvas.toBuffer('image/png');
 };
 
 module.exports = async (req, res) => {

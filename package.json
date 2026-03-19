@@ -2,9 +2,7 @@
   "name": "mackathon-cert",
   "version": "1.0.0",
   "dependencies": {
-    "csv-parser": "^3.0.0",
-    "sharp": "0.33.5",
-    "node-fetch": "^3.3.2",
-    "xlsx": "^0.18.5"
+    "@napi-rs/canvas": "^0.1.65",
+    "csv-parser": "^3.0.0"
   }
 }
