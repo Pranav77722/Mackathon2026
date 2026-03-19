@@ -1,4 +1,4 @@
-const Jimp = require('jimp');
+const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
 const csv = require('csv-parser');
@@ -8,16 +8,13 @@ const GOOGLE_SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vS
 
 const fetchMasterData = async () => {
     const response = await fetch(GOOGLE_SHEET_CSV_URL);
-    if (!response.ok) {
-        throw new Error(`Failed to fetch Google Sheet: ${response.statusText}`);
-    }
+    if (!response.ok) throw new Error(`Failed to fetch Google Sheet: ${response.statusText}`);
     const csvText = await response.text();
 
     return new Promise((resolve, reject) => {
         const results = [];
         const stream = Readable.from([csvText]);
-        stream
-            .pipe(csv())
+        stream.pipe(csv())
             .on('data', (row) => results.push(row))
             .on('end', () => resolve(results))
             .on('error', (err) => reject(err));
@@ -25,64 +22,72 @@ const fetchMasterData = async () => {
 };
 
 /**
- * Custom font loader that reads font files as Buffers first,
- * avoiding any internal path resolution issues in jimp.
+ * Escape special XML characters to prevent SVG injection issues.
  */
-const loadLocalFont = async (fntPath) => {
-    // Read the .fnt XML file
-    const fntContent = fs.readFileSync(fntPath, 'utf8');
-    const fontDir = path.dirname(fntPath);
+const xmlEscape = (str) =>
+    str.replace(/&/g, '&amp;')
+       .replace(/</g, '&lt;')
+       .replace(/>/g, '&gt;')
+       .replace(/"/g, '&quot;')
+       .replace(/'/g, '&apos;');
 
-    // Parse jimp's internal format: it expects an object with data + pages
-    // We use jimp's internal loadFont with a file url approach, but the safest
-    // method is to temporarily symlink or use the full resolved path.
-    // Since jimp uses `uniqs` internally, we just call loadFont with the
-    // absolute path directly - which SHOULD work given our __dirname approach.
-    return await Jimp.loadFont(fntPath);
+/**
+ * Calculate font size dynamically, scaling down if the text is too long.
+ */
+const calcFontSize = (text, maxPx, startSize = 58) => {
+    // Approximate: average char width ~ 0.55 * fontSize for serif bold
+    let size = startSize;
+    while (size > 24 && text.length * size * 0.58 > maxPx) {
+        size -= 2;
+    }
+    return size;
 };
 
 const generateCertificateBuffer = async (studentName, teamName) => {
     const templatePath = path.join(__dirname, 'assets', 'certificate_template.png');
-    const fontPath = path.join(__dirname, 'fonts', 'open-sans-64-black', 'open-sans-64-black.fnt');
-
-    console.log('[generate] Template:', templatePath, '| exists:', fs.existsSync(templatePath));
-    console.log('[generate] Font:', fontPath, '| exists:', fs.existsSync(fontPath));
 
     if (!fs.existsSync(templatePath)) {
         throw new Error(`Template not found: ${templatePath}`);
     }
-    if (!fs.existsSync(fontPath)) {
-        const fontsDir = path.join(__dirname, 'fonts');
-        const contents = fs.existsSync(fontsDir) ? JSON.stringify(fs.readdirSync(fontsDir)) : 'fonts dir missing';
-        throw new Error(`Font not found: ${fontPath}. Fonts dir: ${contents}`);
-    }
 
-    const image = await Jimp.read(templatePath);
-    const font = await Jimp.loadFont(fontPath);
+    // Get template dimensions
+    const meta = await sharp(templatePath).metadata();
+    const { width, height } = meta;
 
-    const displayText = `${studentName} of Team "${teamName}"`;
+    const displayText = xmlEscape(`${studentName} of Team "${teamName}"`);
 
-    const width = image.bitmap.width;
-    const height = image.bitmap.height;
+    // The blank area on the certificate is roughly between 48% and 60% of height
+    // Center text at ~53% down
+    const textY = Math.floor(height * 0.535);
+    const maxTextWidth = Math.floor(width * 0.65);
+    const fontSize = calcFontSize(displayText, maxTextWidth);
 
-    const maxWidth = Math.floor(width * 0.75);
-    const textX = Math.floor((width - maxWidth) / 2);
-    const textY = Math.floor(height * 0.54);
+    // Build SVG overlay (same size as certificate, transparent background)
+    const svgOverlay = `
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+  <text
+    x="${Math.floor(width / 2)}"
+    y="${textY}"
+    text-anchor="middle"
+    dominant-baseline="middle"
+    font-family="Georgia, 'Times New Roman', serif"
+    font-size="${fontSize}"
+    font-weight="bold"
+    fill="#1a1a6e"
+    letter-spacing="1"
+  >${displayText}</text>
+</svg>`;
 
-    image.print(
-        font,
-        textX,
-        textY,
-        {
-            text: displayText,
-            alignmentX: Jimp.HORIZONTAL_ALIGN_CENTER,
-            alignmentY: Jimp.VERTICAL_ALIGN_MIDDLE
-        },
-        maxWidth,
-        Math.floor(height * 0.1)
-    );
+    const buffer = await sharp(templatePath)
+        .composite([{
+            input: Buffer.from(svgOverlay),
+            top: 0,
+            left: 0
+        }])
+        .png()
+        .toBuffer();
 
-    return await image.getBufferAsync(Jimp.MIME_PNG);
+    return buffer;
 };
 
 module.exports = async (req, res) => {
@@ -116,7 +121,7 @@ module.exports = async (req, res) => {
         const fullName = (record['Name'] || '').trim();
         const teamName = (record['Team Name'] || record['Team Name '] || '-').trim();
 
-        console.log(`[generate] Creating certificate for: ${fullName} / ${teamName}`);
+        console.log(`[generate] Creating for: ${fullName} / ${teamName}`);
 
         const buffer = await generateCertificateBuffer(fullName, teamName);
         res.setHeader('Content-Type', 'image/png');
