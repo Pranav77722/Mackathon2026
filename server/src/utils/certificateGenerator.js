@@ -8,10 +8,10 @@ if (!fs.existsSync(generatedDir)) {
     fs.mkdirSync(generatedDir, { recursive: true });
 }
 
-const generateCertificate = async (studentName, courseName, date) => {
+const generateCertificate = async (studentName, teamName, date) => {
     try {
         const templatePath = path.join(__dirname, '../../assets/certificate_template.png');
-        
+
         // Check if template exists
         if (!fs.existsSync(templatePath)) {
             throw new Error('Certificate template not found');
@@ -24,57 +24,40 @@ const generateCertificate = async (studentName, courseName, date) => {
         // Draw template
         ctx.drawImage(image, 0, 0, image.width, image.height);
 
-        // Configure text drawing
-        ctx.textBaseline = 'bottom'; // Easier to align with underlines
-        
-        // 1. Participant Name
-        // Font: Serif / elegant, 42-48 px, Normal weight, Black
-        // Alignment: Center aligned horizontally
-        // Position: X = center, Y = ~440-460px (slightly above "Mr./Miss" underline)
-        ctx.font = '45px "Times New Roman", serif';
-        ctx.fillStyle = '#000000';
+        // Build the single-line text: "Name of Team Name"
+        const displayText = `${studentName} of Team "${teamName}"`;
+
+        // Configure text - centered in the blank space
+        ctx.textBaseline = 'middle';
         ctx.textAlign = 'center';
-        
-        // Auto-reduce font size if name is too long
-        // Simple heuristic: if name is very long (> 20 chars), drop size
-        if (studentName.length > 20) {
-            ctx.font = '38px "Times New Roman", serif';
-        }
-        
-        // Draw Name sitting on the underline
-        // User requested approx 440-460px, moving up to 435
-        ctx.fillText(studentName, canvas.width / 2, 435); 
+        ctx.fillStyle = '#1a1a6e'; // Dark blue to match the certificate theme
 
-        // 2. Team Name
-        // Spec: X=450, Y=520, Font size 30-34px, reduction if needed.
-        let teamFontSize = 32;
-        ctx.font = `${teamFontSize}px "Times New Roman", serif`;
-        ctx.textAlign = 'left';
-        
-        // Measure and reduce if too wide (assuming max width ~400px based on visual layout)
-        const maxTeamWidth = 400; 
-        let teamWidth = ctx.measureText(courseName).width;
-        
-        while (teamWidth > maxTeamWidth && teamFontSize > 20) {
-            teamFontSize -= 2;
-            ctx.font = `${teamFontSize}px "Times New Roman", serif`;
-            teamWidth = ctx.measureText(courseName).width;
+        // Start with a good font size and auto-reduce if text is too wide
+        let fontSize = 46;
+        const maxTextWidth = image.width * 0.65; // Keep within ~65% of certificate width
+
+        ctx.font = `bold ${fontSize}px "Times New Roman", serif`;
+        let textWidth = ctx.measureText(displayText).width;
+
+        while (textWidth > maxTextWidth && fontSize > 18) {
+            fontSize -= 2;
+            ctx.font = `bold ${fontSize}px "Times New Roman", serif`;
+            textWidth = ctx.measureText(displayText).width;
         }
 
-        // Draw Team Name on the underline
-        // Analysis of screenshot: 650 is too far right (overlaps 'participated').
-        // 'of team' likely ends around 250. Line starts there.
-        ctx.fillText(courseName, 300, 480);
+        // Position: centered horizontally, in the blank area between
+        // "THIS CERTIFICATE IS PROUDLY PRESENTED TO:" and the horizontal line
+        // Adjust Y based on your template — this targets the center of that blank space
+        const textX = image.width / 2;
+        const textY = image.height * 0.56; // ~56% down from top (the blank area)
 
-        // Date (Optional - Placed at bottom if needed, or ignored if not fitting template context)
-        // ctx.font = '20px Sans';
-        // ctx.fillText(date, canvas.width / 2, canvas.height - 100);
+        ctx.fillText(displayText, textX, textY);
 
         // Save file
         const fileName = `${studentName.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.png`;
         const filePath = path.join(generatedDir, fileName);
         const buffer = canvas.toBuffer('image/png');
-        
+
         fs.writeFileSync(filePath, buffer);
 
         return fileName;
