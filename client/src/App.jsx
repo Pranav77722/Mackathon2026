@@ -32,7 +32,7 @@ function App() {
       setTeamName('');
 
       try {
-        const response = await fetch(`http://localhost:5000/api/lookup-team?teamId=${encodeURIComponent(teamId.trim())}`);
+        const response = await fetch(`/api/lookup-team?teamId=${encodeURIComponent(teamId.trim())}`);
         const data = await response.json();
 
         if (response.ok) {
@@ -58,28 +58,28 @@ function App() {
     setGeneratedFiles([]);
 
     try {
-      const response = await fetch('http://localhost:5000/api/generate-single', {
+      const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, teamId }),
       });
 
-      const data = await response.json();
-
       if (response.ok) {
+        const imageBlob = await response.blob();
+        const imageUrl = URL.createObjectURL(imageBlob);
+        
         setStatus({
-          successCount: data.successCount,
-          failureCount: data.failureCount,
-          errors: data.errors
+          successCount: 1,
+          failureCount: 0,
+          errors: []
         });
-        const files = data.generatedFiles || [];
-        setGeneratedFiles(files);
+        
+        setGeneratedFiles([imageUrl]);
 
         // Auto-open certificate in a new tab
-        if (files.length > 0) {
-          window.open(`http://localhost:5000${files[0]}`, '_blank');
-        }
+        window.open(imageUrl, '_blank');
       } else {
+        const data = await response.json();
         setStatus({
           successCount: 0,
           failureCount: 1,

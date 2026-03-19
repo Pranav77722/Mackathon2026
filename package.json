@@ -1,0 +1,10 @@
+{
+  "name": "mackathon-cert",
+  "version": "1.0.0",
+  "dependencies": {
+    "canvas": "^2.11.2",
+    "csv-parser": "^3.0.0",
+    "node-fetch": "^3.3.2",
+    "xlsx": "^0.18.5"
+  }
+}
