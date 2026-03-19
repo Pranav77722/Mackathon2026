@@ -11,14 +11,18 @@
       "use": "@vercel/node"
     }
   ],
-  "rewrites": [
+  "routes": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/$1"
+      "src": "/api/generate",
+      "dest": "/api/generate.js"
     },
     {
-      "source": "/(.*)",
-      "destination": "/client/$1"
+      "src": "/api/lookup-team",
+      "dest": "/api/lookup-team.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/client/$1"
     }
   ]
 }
